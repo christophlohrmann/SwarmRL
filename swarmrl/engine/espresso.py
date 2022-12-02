@@ -438,6 +438,49 @@ class EspressoMD(Engine):
                     epsilon=self.params.WCA_epsilon.m_as("sim_energy"),
                 )
 
+    def add_constant_flowfield(
+        self, velocity: pint.Quantity, friction_coefficient: pint.Quantity = None
+    ):
+        """
+        Add a force F = - friction_coefficient (v_colloid - velocity) to the particles.
+
+        Parameters
+        ----------
+        velocity: pint.Quantity
+            The velocity as a Quantity of numpy array, e.g.
+            v = Quantity(np.array([1,0,0], "micrometer/second")
+        friction_coefficient: pint.Quantity
+            We can set only one friction coefficient.
+            A warning will be raised if you have multiple colloid sizes.
+            If None (default), will calculate the friction coefficient
+            the same way as for the Brownian thermostat
+        """
+
+        vel_sim_units = velocity.m_as("sim_velocity")
+        if friction_coefficient is None:
+            radii = self.colloid_radius_register.values()
+            if len(radii) == 0:
+                raise ValueError(
+                    "If you did not add any colloids yet, you need to specify the"
+                    " friction coefficient manually"
+                )
+            if not np.all(radii == radii[0]):
+                logger.warning(
+                    "You have differently sized colloid radii:"
+                    f" {self.colloid_colloid_radius_register}. However only the first"
+                    " will be used to set up the friction with the constant flow field"
+                )
+            gamma, _ = self.get_friction_coefficients(
+                self.colloid_radius_register.keys()[0]
+            )
+        else:
+            gamma = friction_coefficient.m_as("sim_force/sim_velocity")
+
+        field = espressomd.constraints.HomogeneousFlowField(
+            u=vel_sim_units, gamma=gamma
+        )
+        self.system.constraints.add(field)
+
     def get_friction_coefficients(self, type: int):
         """
         Returns both the translational and the rotational friction coefficient
