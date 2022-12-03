@@ -189,7 +189,7 @@ class ProximalPolicyLoss(Loss, ABC):
                 self.storage["ratio"].append(ratio)
                 self.storage["actor_loss"].append(actor_loss)
                 self.storage["advantage"].append(advantage)
-            return actor_loss + self.entropy_coefficient * entropy.primal
+            return -1 * actor_loss - self.entropy_coefficient * entropy
 
     def compute_loss(self, actor: FlaxModel, critic: FlaxModel, episode_data):
         """
