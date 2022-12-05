@@ -30,13 +30,10 @@ class GumbelDistribution(SamplingStrategy, ABC):
                 Returns the shannon entropy of the distribution.
 
         """
-        # print(probabilities.shape)
         entropy_val = np.sum(-1 * (probabilities * np.log(probabilities)), axis=-1)
         entropy_val = np.mean(entropy_val)
-        # print(entropy_val.primal)
-        max_entropy = 1  # -1 * np.log(1 / probabilities.shape[-1])
 
-        return entropy_val / max_entropy
+        return entropy_val
 
     def __call__(self, logits: np.ndarray, **kwargs):
         """

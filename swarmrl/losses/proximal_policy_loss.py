@@ -15,7 +15,7 @@ from flax.core.frozen_dict import FrozenDict
 from swarmrl.losses.loss import Loss
 from swarmrl.networks.flax_network import FlaxModel
 from swarmrl.sampling_strategies.gumbel_distribution import GumbelDistribution
-from swarmrl.utils.utils import gather_n_dim_indices, record_training
+from swarmrl.utils.utils import gather_n_dim_indices
 from swarmrl.value_functions.expected_returns import ExpectedReturns
 
 
@@ -31,7 +31,7 @@ class ProximalPolicyLoss(Loss, ABC):
         n_epochs: int = 10,
         epsilon: float = 0.2,
         entropy_coefficient: float = 0.01,
-        record_training=False,
+        record_training: bool = False,
     ):
         """
         Constructor for the PPO class.
@@ -91,15 +91,12 @@ class ProximalPolicyLoss(Loss, ABC):
         """
         predicted_values = critic.apply_fn({"params": critic_params}, features)
         predicted_values = jnp.squeeze(predicted_values)
+        value_loss = jnp.sum(optax.huber_loss(predicted_values, true_values), axis=0)
 
-        value_loss = optax.huber_loss(predicted_values, true_values)
+        critic_loss = jnp.mean(value_loss)
 
-        particle_loss = jnp.mean(value_loss, 0)
-
-        critic_loss = jnp.mean(particle_loss)
-
-        if self.record_training:
-            self.storage["critic_loss"].append(critic_loss.primal)
+        # if self.record_training:
+        #     self.storage["critic_loss"].append(critic_loss.primal)
 
         return critic_loss
 
@@ -150,7 +147,7 @@ class ProximalPolicyLoss(Loss, ABC):
         new_probabilities = jax.nn.softmax(new_logits)
 
         # compute the entropy of the whole distribution
-        entropy = jnp.mean(self.sampling_strategy.compute_entropy(new_probabilities))
+        entropy = self.sampling_strategy.compute_entropy(new_probabilities)
         new_log_probs = jnp.log(gather_n_dim_indices(new_probabilities, actions))
 
         # compute the ratio between old and new probs
@@ -161,35 +158,35 @@ class ProximalPolicyLoss(Loss, ABC):
         advantage = true_values - jnp.squeeze(predicted_values)
 
         # compute the clipped loss
-        clipped_loss = -1 * jnp.minimum(
+        clipped_loss = jnp.minimum(
             ratio * advantage,
             jnp.clip(ratio, 1 - self.epsilon, 1 + self.epsilon) * advantage,
         )
 
         # sum over the time steps
-        particle_loss = jnp.mean(clipped_loss, 0)
+        particle_loss = jnp.sum(clipped_loss, axis=0)
 
         # mean over the particle losses
         actor_loss = jnp.mean(particle_loss)
 
         # this exception is necessary to pass the tests.
-        try:
-            if self.record_training:
-                self.storage["new_log_probs"].append(new_log_probs)
-                self.storage["entropy"].append(entropy)
-                self.storage["ratio"].append(ratio.primal)
-                self.storage["actor_loss"].append(actor_loss)
-                self.storage["advantage"].append(advantage)
-            return actor_loss + self.entropy_coefficient * entropy.primal
-
-        except AttributeError:
-            if self.record_training:
-                self.storage["new_log_probs"].append(new_log_probs)
-                self.storage["entropy"].append(entropy)
-                self.storage["ratio"].append(ratio)
-                self.storage["actor_loss"].append(actor_loss)
-                self.storage["advantage"].append(advantage)
-            return -1 * actor_loss - self.entropy_coefficient * entropy
+        # try:
+        #     # if self.record_training:
+        #     #     self.storage["new_log_probs"].append(new_log_probs)
+        #     #     self.storage["entropy"].append(entropy)
+        #     #     self.storage["ratio"].append(ratio.primal)
+        #     #     self.storage["actor_loss"].append(actor_loss)
+        #     #     self.storage["advantage"].append(advantage)
+        #     return -1 * actor_loss - self.entropy_coefficient * entropy
+        #
+        # except AttributeError:
+        #     # if self.record_training:
+        #     #     self.storage["new_log_probs"].append(new_log_probs)
+        #     #     self.storage["entropy"].append(entropy)
+        #     #     self.storage["ratio"].append(ratio)
+        #     #     self.storage["actor_loss"].append(actor_loss)
+        #     #     self.storage["advantage"].append(advantage)
+        return -1 * actor_loss - self.entropy_coefficient * entropy
 
     def compute_loss(self, actor: FlaxModel, critic: FlaxModel, episode_data):
         """
@@ -214,8 +211,11 @@ class ProximalPolicyLoss(Loss, ABC):
         action_data = episode_data.item().get("actions")
         reward_data = episode_data.item().get("rewards")
 
+        # Define here to avoid re-tracing  TODO: Move to init.
+        actor_grad_fn = jax.value_and_grad(self.compute_actor_loss, 1)
+        critic_grad_fn = jax.value_and_grad(self.compute_critic_loss, 1)
+
         for _ in range(self.n_epochs):
-            actor_grad_fn = jax.value_and_grad(self.compute_actor_loss, 1)
             actor_loss, actor_grad = actor_grad_fn(
                 actor,
                 actor.model_state.params,
@@ -226,7 +226,6 @@ class ProximalPolicyLoss(Loss, ABC):
                 self.value_function(reward_data),
             )
 
-            critic_grad_fn = jax.value_and_grad(self.compute_critic_loss, 1)
             critic_loss, critic_grad = critic_grad_fn(
                 critic,
                 critic.model_state.params,
@@ -237,9 +236,9 @@ class ProximalPolicyLoss(Loss, ABC):
             actor.update_model(actor_grad)
             critic.update_model(critic_grad)
 
-        # write training specs to disc
-        record_training(self.storage)
-
-        # empty storage
-        for key, value in self.storage.items():
-            self.storage[key] = []
+        # # write training specs to disc
+        # record_training(self.storage)
+        #
+        # # empty storage
+        # for key, value in self.storage.items():
+        #     self.storage[key] = []
