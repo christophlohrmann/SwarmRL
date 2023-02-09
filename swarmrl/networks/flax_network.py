@@ -80,6 +80,14 @@ class FlaxModel(Network, ABC):
 
             self.epoch_count = 0
 
+    def reinitialize_model(self, rng_key: int):
+        """
+        Reinitialize a models parameters.
+        """
+        init_rng = jax.random.PRNGKey(rng_key)
+        _, subkey = jax.random.split(init_rng)
+        self.model_state = self._create_train_state(subkey)
+
     def _create_train_state(self, init_rng: int) -> TrainState:
         """
         Create a training state of the model.
