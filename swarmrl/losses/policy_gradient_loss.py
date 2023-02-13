@@ -17,11 +17,11 @@ from flax.core.frozen_dict import FrozenDict
 
 from swarmrl.losses.loss import Loss
 from swarmrl.networks.network import Network
-from swarmrl.utils.utils import gather_n_dim_indices
+from swarmrl.utils.utils import gather_n_dim_indices, record_loss
 from swarmrl.value_functions.expected_returns import ExpectedReturns
 
 logger = logging.getLogger(__name__)
-
+eps = jax.numpy.finfo(float).eps
 
 class PolicyGradientLoss(Loss):
     """
@@ -43,6 +43,17 @@ class PolicyGradientLoss(Loss):
         self.value_function = value_function
         self.n_particles = None
         self.n_time_steps = None
+        self.memory = {"feature_data": None,
+                       "rewards": None,
+                       "action_indices:": None,
+                       "probabilities": None,
+                       "chosen probs": None,
+                       "value fun vals": None,
+                       "critic vals": None,
+                       "advantage": None,
+                       "actor loss": None,
+                       "critic loss": None
+                       }
 
     def _compute_actor_loss(
         self,
@@ -81,9 +92,10 @@ class PolicyGradientLoss(Loss):
         logits = actor.apply_fn({"params": actor_params}, feature_data)
         probabilities = jax.nn.softmax(logits)  # get probabilities
         chosen_probabilities = gather_n_dim_indices(probabilities, action_indices)
-        log_probs = np.log(chosen_probabilities)
+        log_probs = np.log(chosen_probabilities+eps)
         logger.debug(f"{log_probs.shape=}")
 
+        print(f"log_probs (pgo): {log_probs.primal}")
         value_function_values = self.value_function(rewards)
         logger.debug(f"{value_function_values.shape}")
 
@@ -97,6 +109,15 @@ class PolicyGradientLoss(Loss):
         loss = -1 * ((log_probs * advantage).sum(axis=0)).mean()
         logger.debug(f"{loss=}")
 
+        self.memory["feature_data"] = feature_data
+        self.memory["rewards"] = rewards
+        self.memory["action_indices:"] = action_indices
+        self.memory["probabilities"] = probabilities.primal
+        self.memory["chosen probs"] = chosen_probabilities.primal
+        self.memory["value fun vals"] = value_function_values
+        self.memory["critic vals"] = critic_values
+        self.memory["advantage"] = advantage
+        self.memory["actor loss"] = loss.primal
         return loss
 
     def _compute_critic_loss(
@@ -135,7 +156,7 @@ class PolicyGradientLoss(Loss):
         loss = np.sum(optax.huber_loss(critic_values, value_function_values), axis=0)
 
         loss = np.mean(loss)
-
+        self.memory["critic loss"] = loss.primal
         return loss
 
     def compute_loss(
@@ -173,7 +194,37 @@ class PolicyGradientLoss(Loss):
         critic_loss, critic_grads = critic_grad_fn(
             critic.model_state.params, feature_data, reward_data, critic
         )
-
+        losses = np.array([[actor_loss], [critic_loss]])
+        print(f"losses in pgo: {losses}")
+        record_loss(losses)
         # Update the models
         actor.update_model(actor_grad)
         critic.update_model(critic_grads)
+
+        self.memory = data_saver(self.memory)
+
+
+def data_saver(data: dict):
+    empty_memory = {"feature_data": [],
+                    "rewards": [],
+                    "action_indices:": [],
+                    "probabilities": [],
+                    "chosen probs": [],
+                    "value fun vals": [],
+                    "critic vals": [],
+                    "advantage": [],
+                    "actor loss": [],
+                    "critic loss": []
+                    }
+    try:
+        reloaded_dict = np.load("dummy_data.npy", allow_pickle=True).item()
+        for key, item in reloaded_dict.items():
+            reloaded_dict[key].append(data[key])
+        np.save("dummy_data.npy", reloaded_dict, allow_pickle=True)
+    except FileNotFoundError:
+        for key, item in empty_memory.items():
+            empty_memory[key].append(data[key])
+        np.save("dummy_data.npy", empty_memory, allow_pickle=True)
+
+    return empty_memory
+

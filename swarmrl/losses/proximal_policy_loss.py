@@ -16,7 +16,7 @@ from flax.core.frozen_dict import FrozenDict
 from swarmrl.losses.loss import Loss
 from swarmrl.networks.flax_network import FlaxModel
 from swarmrl.sampling_strategies.gumbel_distribution import GumbelDistribution
-from swarmrl.utils.utils import gather_n_dim_indices, record_training
+from swarmrl.utils.utils import gather_n_dim_indices
 from swarmrl.value_functions.generalized_advantage_estimate import GAE
 
 
@@ -32,7 +32,7 @@ class ProximalPolicyLoss(Loss, ABC):
         n_epochs: int = 20,
         epsilon: float = 0.2,
         entropy_coefficient: float = 0.01,
-        record_training=False,
+        record_training=True,
     ):
         """
         Constructor for the PPO class.
@@ -57,14 +57,20 @@ class ProximalPolicyLoss(Loss, ABC):
         self.epsilon = epsilon
         self.entropy_coefficient = entropy_coefficient
         self.record_training = record_training
-        self.storage = {
-            "critic_loss": [],
-            "new_log_probs": [],
-            "entropy": [],
-            "ratio": [],
-            "advantage": [],
-            "actor_loss": [],
-        }
+        self.memory = {"feature_data": [],
+                        "rewards": [],
+                        "action_indices:": [],
+                        "old_probs": [],
+                        "advantages": [],
+                        "returns": [],
+                        "critic_vals": [],
+                        "new_logits": [],
+                        "entropy": [],
+                        "chosen-probs": [],
+                        "ratio": [],
+                        "actor loss": [],
+                        "critic loss": []
+                        }
 
     def compute_critic_loss(
         self, critic_params: FrozenDict, critic: FlaxModel, features, true_values
@@ -99,7 +105,7 @@ class ProximalPolicyLoss(Loss, ABC):
         critic_loss = jnp.sum(particle_loss)
 
         if self.record_training:
-            self.storage["critic_loss"].append(critic_loss.primal)
+            self.memory["critic_loss"].append(critic_loss.primal)
 
         return critic_loss
 
@@ -167,24 +173,14 @@ class ProximalPolicyLoss(Loss, ABC):
         # mean over the particle losses
         actor_loss = jnp.mean(particle_loss)
 
-        # this exception is necessary to pass the tests.
-        try:
-            if self.record_training:
-                self.storage["new_log_probs"].append(new_log_probs)
-                self.storage["entropy"].append(entropy)
-                self.storage["ratio"].append(ratio.primal)
-                self.storage["actor_loss"].append(actor_loss)
-                self.storage["advantage"].append(advantages)
-            return actor_loss + self.entropy_coefficient * entropy.primal
+        if self.record_training:
+            self.memory["new_logits"].append(new_logits.primal)
+            self.memory["entropy"].append(entropy.primal)
+            self.memory["chose_log_probs"].append(new_log_probs.primal)
+            self.memory["ratio"].append(ratio.primal)
+            self.memory["actor_loss"].append(clipped_loss.primal)
 
-        except AttributeError:
-            if self.record_training:
-                self.storage["new_log_probs"].append(new_log_probs)
-                self.storage["entropy"].append(entropy)
-                self.storage["ratio"].append(ratio)
-                self.storage["actor_loss"].append(actor_loss)
-                self.storage["advantage"].append(advantages)
-            return actor_loss + self.entropy_coefficient * entropy
+        return actor_loss + self.entropy_coefficient * entropy
 
     def compute_loss(self, actor: FlaxModel, critic: FlaxModel, episode_data):
         """
@@ -221,7 +217,8 @@ class ProximalPolicyLoss(Loss, ABC):
             # compute the advantages and returns (true_values) for that epoch
             predicted_values = np.squeeze(critic(feature_data))
             advantages = self.value_function(rewards=reward_data,
-                                             values=predicted_values)
+                                              values=predicted_values
+                                              )
             returns = self.value_function.returns(advantages=advantages,
                                                   values=predicted_values)
 
@@ -244,10 +241,43 @@ class ProximalPolicyLoss(Loss, ABC):
 
             actor.update_model(actor_grad)
             critic.update_model(critic_grad)
+            if self.record_training:
+                self.memory["returns"].append(returns)
+                self.memory["advantages"].append(advantages)
+                self.memory["critic_vals"].append(predicted_values)
+            # write training specs to disc
 
-        # write training specs to disc
-        record_training(self.storage)
+        if self.record_training:
+            self.memory["feature_data"] = feature_data
+            self.memory["old_probs"] = old_probs_data
+            self.memory["action_indices"] = action_data
+            self.memory["rewards"] = reward_data
 
-        # empty storage
-        for key, value in self.storage.items():
-            self.storage[key] = []
+
+def data_saver(data: dict):
+    empty_memory = {"feature_data": [],
+                    "rewards": [],
+                    "action_indices:": [],
+                    "old_probs": [],
+                    "advantages": [],
+                    "returns": [],
+                    "critic_vals": [],
+                    "new_logits": [],
+                    "entropy": [],
+                    "chosen-probs": [],
+                    "ratio": [],
+                    "actor loss": [],
+                    "critic loss": []
+                    }
+
+    try:
+        reloaded_dict = np.load("dummy_data.npy", allow_pickle=True).item()
+        for key, item in reloaded_dict.items():
+            reloaded_dict[key].append(data[key])
+        np.save("dummy_data.npy", reloaded_dict, allow_pickle=True)
+    except FileNotFoundError:
+        for key, item in empty_memory.items():
+            empty_memory[key].append(data[key])
+        np.save("dummy_data.npy", empty_memory, allow_pickle=True)
+
+    return empty_memory
