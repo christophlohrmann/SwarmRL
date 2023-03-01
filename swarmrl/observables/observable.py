@@ -4,17 +4,15 @@ Parent class for the observable.
 from typing import List
 
 from swarmrl.models.interaction_model import Colloid
-from swarmrl.swarm_rl_module import SwarmRLMethod
 
 
-class Observable(SwarmRLMethod):
+
+class Observable():
     """
     Parent class for observables.
 
     Observables act as inputs to the neural networks.
     """
-    def __init__(self):
-        super().__init__()
 
     _observable_shape: tuple
 

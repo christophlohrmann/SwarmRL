@@ -56,6 +56,7 @@ class ProximalPolicyLoss(Loss, ABC):
         self.n_epochs = n_epochs
         self.epsilon = epsilon
         self.entropy_coefficient = entropy_coefficient
+        self.eps = 1e-8
         self.record_training = record_training
         self.memory = {"feature_data": [],
                         "rewards": [],
@@ -66,10 +67,10 @@ class ProximalPolicyLoss(Loss, ABC):
                         "critic_vals": [],
                         "new_logits": [],
                         "entropy": [],
-                        "chosen-probs": [],
+                        "chosen_probs": [],
                         "ratio": [],
-                        "actor loss": [],
-                        "critic loss": []
+                        "actor_loss": [],
+                        "critic_loss": []
                         }
 
     def compute_critic_loss(
@@ -155,11 +156,11 @@ class ProximalPolicyLoss(Loss, ABC):
         new_probabilities = jax.nn.softmax(new_logits)
 
         # compute the entropy of the whole distribution
-        entropy = jnp.mean(self.sampling_strategy.compute_entropy(new_probabilities))
-        new_log_probs = jnp.log(gather_n_dim_indices(new_probabilities, actions))
+        entropy = jnp.sum(self.sampling_strategy.compute_entropy(new_probabilities))
+        chosen_probs = jnp.log(gather_n_dim_indices(new_probabilities, actions)+self.eps)
 
         # compute the ratio between old and new probs
-        ratio = jnp.exp(new_log_probs - jnp.log(old_probs))
+        ratio = jnp.exp(chosen_probs - jnp.log(old_probs+self.eps))
 
         # compute the clipped loss
         clipped_loss = -1 * jnp.minimum(
@@ -168,15 +169,15 @@ class ProximalPolicyLoss(Loss, ABC):
         )
 
         # mean over the time steps
-        particle_loss = jnp.mean(clipped_loss, 0)
+        particle_loss = jnp.sum(clipped_loss, axis=0)
 
         # mean over the particle losses
-        actor_loss = jnp.mean(particle_loss)
+        actor_loss = jnp.sum(particle_loss)
 
         if self.record_training:
             self.memory["new_logits"].append(new_logits.primal)
             self.memory["entropy"].append(entropy.primal)
-            self.memory["chose_log_probs"].append(new_log_probs.primal)
+            self.memory["chosen_probs"].append(chosen_probs.primal)
             self.memory["ratio"].append(ratio.primal)
             self.memory["actor_loss"].append(clipped_loss.primal)
 
@@ -252,7 +253,7 @@ class ProximalPolicyLoss(Loss, ABC):
             self.memory["old_probs"] = old_probs_data
             self.memory["action_indices"] = action_data
             self.memory["rewards"] = reward_data
-
+            self.memory = data_saver(self.memory)
 
 def data_saver(data: dict):
     empty_memory = {"feature_data": [],
@@ -264,10 +265,10 @@ def data_saver(data: dict):
                     "critic_vals": [],
                     "new_logits": [],
                     "entropy": [],
-                    "chosen-probs": [],
+                    "chosen_probs": [],
                     "ratio": [],
-                    "actor loss": [],
-                    "critic loss": []
+                    "actor_loss": [],
+                    "critic_loss": []
                     }
 
     try:
@@ -276,6 +277,7 @@ def data_saver(data: dict):
             reloaded_dict[key].append(data[key])
         np.save("dummy_data.npy", reloaded_dict, allow_pickle=True)
     except FileNotFoundError:
+        print('new_one')
         for key, item in empty_memory.items():
             empty_memory[key].append(data[key])
         np.save("dummy_data.npy", empty_memory, allow_pickle=True)

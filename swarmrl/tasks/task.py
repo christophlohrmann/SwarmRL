@@ -7,9 +7,8 @@ The reward classes handle the computation of the reward from an environment and
 compute the loss for the models to train on.
 """
 import jax.numpy as np
-from swarmrl.swarm_rl_module import SwarmRLMethod
 
-class Task(SwarmRLMethod):
+class Task():
     """
     Parent class for the reinforcement learning tasks.
     """
@@ -18,7 +17,6 @@ class Task(SwarmRLMethod):
         """
         Constructor for the reward class.
         """
-        super(Task, self).__init__()
         pass
 
     def __call__(

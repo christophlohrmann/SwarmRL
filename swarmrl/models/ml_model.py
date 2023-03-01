@@ -61,7 +61,7 @@ class MLModel(InteractionModel):
                 pass
 
     def calc_action(
-        self, colloids: typing.List[Colloid], explore_mode: bool = False
+        self, colloids: typing.List[Colloid], explore_mode: bool = True
     ) -> typing.List[Action]:
         """
         Compute the state of the system based on the current colloid position.
@@ -120,7 +120,7 @@ class MLModel(InteractionModel):
                     logits=np.array(logits[item]),
                     rewards=np.array(rewards[item]),
                 )
-        for item in self.particle_types:
-            record_rewards(particle_type=item, new_rewards=np.array(rewards[item]))
+        #for item in self.particle_types:
+            #record_rewards(particle_type=item, new_rewards=np.array(rewards[item]))
 
         return actions

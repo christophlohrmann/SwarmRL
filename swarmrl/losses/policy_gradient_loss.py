@@ -17,7 +17,7 @@ from flax.core.frozen_dict import FrozenDict
 
 from swarmrl.losses.loss import Loss
 from swarmrl.networks.network import Network
-from swarmrl.utils.utils import gather_n_dim_indices, record_loss
+from swarmrl.utils.utils import gather_n_dim_indices #record_loss
 from swarmrl.value_functions.expected_returns import ExpectedReturns
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ class PolicyGradientLoss(Loss):
         log_probs = np.log(chosen_probabilities+eps)
         logger.debug(f"{log_probs.shape=}")
 
-        print(f"log_probs (pgo): {log_probs.primal}")
+
         value_function_values = self.value_function(rewards)
         logger.debug(f"{value_function_values.shape}")
 
@@ -194,9 +194,7 @@ class PolicyGradientLoss(Loss):
         critic_loss, critic_grads = critic_grad_fn(
             critic.model_state.params, feature_data, reward_data, critic
         )
-        losses = np.array([[actor_loss], [critic_loss]])
-        print(f"losses in pgo: {losses}")
-        record_loss(losses)
+        #losses = np.array([[actor_loss], [critic_loss]])
         # Update the models
         actor.update_model(actor_grad)
         critic.update_model(critic_grads)
