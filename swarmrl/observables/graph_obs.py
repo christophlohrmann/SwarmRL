@@ -68,6 +68,7 @@ class GraphObs(Observable, ABC):
                  relate=False,
                  attention_normalize_fn=utils.segment_softmax,
                  seed=42,
+
                  ):
 
         self.box_size = box_size
@@ -86,6 +87,9 @@ class GraphObs(Observable, ABC):
                        "influencer": None}
 
         self.encode_fn, self.update_node_fn, self.influence_eval_fn = self._init_models()
+        self.memory = {"graphs": [],
+                        "rewards": [],
+                        }
 
     def initialize(self, colloids: list):
         pass
@@ -143,6 +147,9 @@ class GraphObs(Observable, ABC):
                                       angles2[i],
                                       col.type))
                     nodes.append(node)
+        if len(nodes) == 0:
+            nodes.append(np.array([0, 0, 0, 0]))
+
         graph = utils.get_fully_connected_graph(n_node_per_graph=len(nodes),
                                                 n_graph=1,
                                                 node_features=np.array(nodes),
@@ -206,15 +213,13 @@ class GraphObs(Observable, ABC):
         influence = jax.nn.softmax(influence_score)
 
         # computes the actual feature
-        graph_representation = np.sum(tree.tree_map(lambda n, i: n * i,
-                                                    attention_vectors,
-                                                    influence),
-                                      axis=0
-                                      )
+        graph_obs = np.sum(tree.tree_map(lambda n, i: n * i,
+                                         nodes,
+                                         influence),
+                           axis=0)
 
         if not return_graph:
-
-            return graph_representation
+            return graph_obs
 
         else:
             return gn_graph.GraphsTuple(
@@ -222,7 +227,7 @@ class GraphObs(Observable, ABC):
                 edges=edges,
                 receivers=receivers,
                 senders=senders,
-                globals=graph_representation,
+                globals=graph_obs,
                 n_node=n_node,
                 n_edge=n_edge)
 
