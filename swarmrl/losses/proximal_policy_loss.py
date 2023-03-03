@@ -9,14 +9,15 @@ from abc import ABC
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 from flax.core.frozen_dict import FrozenDict
 
 from swarmrl.losses.loss import Loss
 from swarmrl.networks.flax_network import FlaxModel
 from swarmrl.sampling_strategies.gumbel_distribution import GumbelDistribution
-from swarmrl.utils.utils import gather_n_dim_indices, record_training
-from swarmrl.value_functions.expected_returns import ExpectedReturns
+from swarmrl.utils.utils import gather_n_dim_indices
+from swarmrl.value_functions.generalized_advantage_estimate import GAE
 
 
 class ProximalPolicyLoss(Loss, ABC):
@@ -26,12 +27,12 @@ class ProximalPolicyLoss(Loss, ABC):
 
     def __init__(
         self,
-        value_function: ExpectedReturns,
+        value_function: GAE,
         sampling_strategy: GumbelDistribution,
-        n_epochs: int = 10,
+        n_epochs: int = 20,
         epsilon: float = 0.2,
         entropy_coefficient: float = 0.01,
-        record_training=False,
+        record_training=True,
     ):
         """
         Constructor for the PPO class.
@@ -55,18 +56,25 @@ class ProximalPolicyLoss(Loss, ABC):
         self.n_epochs = n_epochs
         self.epsilon = epsilon
         self.entropy_coefficient = entropy_coefficient
+        self.eps = 1e-8
         self.record_training = record_training
-        self.storage = {
-            "critic_loss": [],
-            "new_log_probs": [],
-            "entropy": [],
-            "ratio": [],
-            "advantage": [],
-            "actor_loss": [],
-        }
+        self.memory = {"feature_data": [],
+                        "rewards": [],
+                        "action_indices:": [],
+                        "old_probs": [],
+                        "advantages": [],
+                        "returns": [],
+                        "critic_vals": [],
+                        "new_logits": [],
+                        "entropy": [],
+                        "chosen_log_probs": [],
+                        "ratio": [],
+                        "actor_loss": [],
+                        "critic_loss": []
+                        }
 
     def compute_critic_loss(
-        self, critic: FlaxModel, critic_params: FrozenDict, features, true_values
+        self, critic_params: FrozenDict, critic: FlaxModel, features, true_values
     ) -> jnp.array:
         """
         A function that computes the critic loss.
@@ -94,24 +102,22 @@ class ProximalPolicyLoss(Loss, ABC):
 
         value_loss = optax.huber_loss(predicted_values, true_values)
 
-        particle_loss = jnp.mean(value_loss, 0)
-
-        critic_loss = jnp.mean(particle_loss)
+        particle_loss = jnp.mean(value_loss, 1)
+        critic_loss = jnp.sum(particle_loss)
 
         if self.record_training:
-            self.storage["critic_loss"].append(critic_loss.primal)
+            self.memory["critic_loss"].append(critic_loss.primal)
 
         return critic_loss
 
     def compute_actor_loss(
         self,
-        actor: FlaxModel,
         actor_params: FrozenDict,
-        critic: FlaxModel,
+        actor: FlaxModel,
         features,
         actions,
-        old_log_probs,
-        true_values,
+        old_probs,
+        advantages,
     ) -> jnp.array:
         """
         A function that computes the actor loss.
@@ -129,8 +135,8 @@ class ProximalPolicyLoss(Loss, ABC):
             Observable data for each time step and particle within the episode.
         actions : np.ndarray (n_time_steps, n_particles)
             The actions taken during the episode at each time steps and by each agent.
-        old_log_probs : np.ndarray (n_time_steps, n_particles)
-            The log probs of the taken action during the episode at each time steps and
+        old_probs : np.ndarray (n_time_steps, n_particles)
+            The probs of the taken action during the episode at each time steps and
             by each agent.
         true_values : np.ndarray (n_time_steps, n_particles)
             The state value computed using the rewards received during the episode. To
@@ -150,46 +156,32 @@ class ProximalPolicyLoss(Loss, ABC):
         new_probabilities = jax.nn.softmax(new_logits)
 
         # compute the entropy of the whole distribution
-        entropy = jnp.mean(self.sampling_strategy.compute_entropy(new_probabilities))
-        new_log_probs = jnp.log(gather_n_dim_indices(new_probabilities, actions))
+        entropy = jnp.sum(self.sampling_strategy.compute_entropy(new_probabilities))
+        chosen_log_probs = jnp.log(gather_n_dim_indices(new_probabilities, actions)+self.eps)
 
         # compute the ratio between old and new probs
-        ratio = jnp.exp(new_log_probs - old_log_probs)
-
-        # compute the predicted values and to get the advantage
-        predicted_values = critic(features)
-        advantage = true_values - jnp.squeeze(predicted_values)
+        ratio = jnp.exp(chosen_log_probs - jnp.log(old_probs+self.eps))
 
         # compute the clipped loss
         clipped_loss = -1 * jnp.minimum(
-            ratio * advantage,
-            jnp.clip(ratio, 1 - self.epsilon, 1 + self.epsilon) * advantage,
+            ratio * advantages,
+            jnp.clip(ratio, 1 - self.epsilon, 1 + self.epsilon) * advantages,
         )
 
-        # sum over the time steps
-        particle_loss = jnp.mean(clipped_loss, 0)
+        # mean over the time steps
+        particle_loss = jnp.sum(clipped_loss, axis=0)
 
         # mean over the particle losses
-        actor_loss = jnp.mean(particle_loss)
+        actor_loss = jnp.sum(particle_loss)
 
-        # this exception is necessary to pass the tests.
-        try:
-            if self.record_training:
-                self.storage["new_log_probs"].append(new_log_probs)
-                self.storage["entropy"].append(entropy)
-                self.storage["ratio"].append(ratio.primal)
-                self.storage["actor_loss"].append(actor_loss)
-                self.storage["advantage"].append(advantage)
-            return actor_loss + self.entropy_coefficient * entropy.primal
+        if self.record_training:
+            self.memory["new_logits"].append(new_logits.primal)
+            self.memory["entropy"].append(entropy.primal)
+            self.memory["chosen_probs"].append(chosen_log_probs.primal)
+            self.memory["ratio"].append(ratio.primal)
+            self.memory["actor_loss"].append(clipped_loss.primal)
 
-        except AttributeError:
-            if self.record_training:
-                self.storage["new_log_probs"].append(new_log_probs)
-                self.storage["entropy"].append(entropy)
-                self.storage["ratio"].append(ratio)
-                self.storage["actor_loss"].append(actor_loss)
-                self.storage["advantage"].append(advantage)
-            return actor_loss + self.entropy_coefficient * entropy.primal
+        return actor_loss + self.entropy_coefficient * entropy
 
     def compute_loss(self, actor: FlaxModel, critic: FlaxModel, episode_data):
         """
@@ -210,36 +202,84 @@ class ProximalPolicyLoss(Loss, ABC):
             The updated actor and critic network.
         """
         feature_data = episode_data.item().get("features")
-        old_log_probs_data = jnp.log(jax.nn.softmax(episode_data.item().get("logits")))
+        old_probs_data = episode_data.item().get("logits")
         action_data = episode_data.item().get("actions")
+        # will return the reward per particle.
         reward_data = episode_data.item().get("rewards")
 
-        for _ in range(self.n_epochs):
-            actor_grad_fn = jax.value_and_grad(self.compute_actor_loss, 1)
-            actor_loss, actor_grad = actor_grad_fn(
-                actor,
-                actor.model_state.params,
-                critic,
-                feature_data,
-                action_data,
-                old_log_probs_data,
-                self.value_function(reward_data),
-            )
+        # in case of partial rewards. They are summed up here to give a total reward.
+        try:
+            reward_data = np.sum(reward_data, axis=2)
+        except:
+            pass
 
-            critic_grad_fn = jax.value_and_grad(self.compute_critic_loss, 1)
-            critic_loss, critic_grad = critic_grad_fn(
-                critic,
+        for _ in range(self.n_epochs):
+
+            # compute the advantages and returns (true_values) for that epoch
+            predicted_values = np.squeeze(critic(feature_data))
+            advantages = self.value_function(rewards=reward_data,
+                                              values=predicted_values
+                                              )
+            returns = self.value_function.returns(advantages=advantages,
+                                                  values=predicted_values)
+
+            actor_grad_fn = jax.value_and_grad(self.compute_actor_loss)
+            actor_loss, actor_grad = actor_grad_fn(
+                actor.model_state.params,
+                actor=actor,
+                features=feature_data,
+                actions=action_data,
+                old_probs=old_probs_data,
+                advantages=advantages
+            )
+            critic_grad_fn = jax.grad(self.compute_critic_loss)
+            critic_grad = critic_grad_fn(
                 critic.model_state.params,
-                feature_data,
-                self.value_function(reward_data),
+                critic=critic,
+                features=feature_data,
+                true_values=returns,
             )
 
             actor.update_model(actor_grad)
             critic.update_model(critic_grad)
+            if self.record_training:
+                self.memory["returns"].append(returns)
+                self.memory["advantages"].append(advantages)
+                self.memory["critic_vals"].append(predicted_values)
+            # write training specs to disc
 
-        # write training specs to disc
-        record_training(self.storage)
+        if self.record_training:
+            self.memory["feature_data"] = feature_data
+            self.memory["old_probs"] = old_probs_data
+            self.memory["action_indices"] = action_data
+            self.memory["rewards"] = reward_data
+            self.memory = data_saver(self.memory)
 
-        # empty storage
-        for key, value in self.storage.items():
-            self.storage[key] = []
+def data_saver(data: dict):
+    empty_memory = {"feature_data": [],
+                    "rewards": [],
+                    "action_indices:": [],
+                    "old_probs": [],
+                    "advantages": [],
+                    "returns": [],
+                    "critic_vals": [],
+                    "new_logits": [],
+                    "entropy": [],
+                    "chosen_log_probs": [],
+                    "ratio": [],
+                    "actor_loss": [],
+                    "critic_loss": []
+                    }
+
+    try:
+        reloaded_dict = np.load("dummy_data.npy", allow_pickle=True).item()
+        for key, item in reloaded_dict.items():
+            reloaded_dict[key].append(data[key])
+        np.save("dummy_data.npy", reloaded_dict, allow_pickle=True)
+    except FileNotFoundError:
+        print('new_one')
+        for key, item in empty_memory.items():
+            empty_memory[key].append(data[key])
+        np.save("dummy_data.npy", empty_memory, allow_pickle=True)
+
+    return empty_memory
