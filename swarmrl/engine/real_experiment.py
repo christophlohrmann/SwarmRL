@@ -71,19 +71,33 @@ class RealExperiment(swarmrl.engine.engine.Engine):
         data_size_int = struct.unpack("I", data_size)[0]
         print(f"Received data_size = {data_size_int}")
         print("Waiting for receiving actual data")
+        
         data = self.connection.recv(8 * data_size_int)
-        while data and len(data) < 8 * data_size_int:
-            data.extend(self.connection.recv(8 * data_size_int))
+        receive_num = 1
 
-        # cast bytestream to double array and reshape to [x y theta id]
-        data = np.array(struct.unpack(str(len(data) // 8) + "d", data)).reshape((-1, 4))
-        print(f"Received data with shape {np.shape(data)} \n")
+        # cast bytestream to vector and check if it is long enough yet
+        data_unpacked = np.array(struct.unpack(str(len(data)//8)+"d", data)).reshape((-1, 1))
+        print(f"data_unpacked has the shape {data_unpacked.shape} after receive number {receive_num}")
+
+        # if it is not long enough, receive more
+        while len(data_unpacked) < data_size_int:
+            data = self.connection.recv(8 * data_size_int)
+            receive_num += 1
+            data_unpacked = np.append(data_unpacked,
+                np.array(struct.unpack(str(len(data)//8)+"d", data)).reshape((-1, 1)))
+            print(f"data_unpacked has the shape {data_unpacked.shape} after receive number {receive_num}")
+
+        # When all the data is received, it is brought into the right shape
+        data_reshaped = data_unpacked.reshape((-1,5))
+
+        print(f"Received data with shape {np.shape(data_reshaped)} \n")
         colloids = []
-        for row in data:
+        for row in data_reshaped:
             coll = Colloid(
                 pos=np.array([row[0], row[1], 0]),
                 director=vector_from_angle(row[2]),
-                id=row[3],
+                id=int(row[3]),
+                type=int(row[4])
             )
             colloids.append(coll)
 
@@ -139,7 +153,7 @@ class RealExperiment(swarmrl.engine.engine.Engine):
 
         Parameters
         ----------
-        actions : np.ndarray
+        actions : np.ndarray (n_colloids, )
                 A numpy array of actions to send to the experiment.
 
         Returns
