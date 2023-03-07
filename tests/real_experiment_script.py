@@ -36,7 +36,7 @@ force_model_no_int = simon_models.rotate_rod_vision_cone(
     experiment_engine=True
 )
 
-'''
+
 force_model_int = simon_models.rotate_rod_vision_cone_interaction(
     data_folder="None",
     act_force=10.0,
@@ -49,7 +49,21 @@ force_model_int = simon_models.rotate_rod_vision_cone_interaction(
     phase_len=[42,42,42,42],
     experiment_engine=True
 )
-'''
+
+
+force_model = simon_models.rotate_rod_border_schmell_symmetric(
+    act_force=10.0,
+    act_torque=10.0,
+    n_type=[1000,100],
+    rod_schmell_part_id=[10000,10059],
+    rod_center_part_id=30,
+    rod_particle_type=1,
+    rod_thickness=100/60/2, #rodlength/particle number
+    radius_colloid=3.0,
+    force_team_spirit_fac=0,
+    rod_break_ang_vel= 42,
+    rod_break= False,
+)
 
 
 experiment.integrate(100000000000, force_model_no_int)
