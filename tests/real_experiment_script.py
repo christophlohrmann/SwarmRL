@@ -51,7 +51,7 @@ force_model_int = simon_models.rotate_rod_vision_cone_interaction(
 )
 
 
-force_model = simon_models.rotate_rod_border_schmell_symmetric(
+force_model_sym = simon_models.rotate_rod_border_schmell_symmetric(
     act_force=10.0,
     act_torque=10.0,
     n_type=[1000,100],
@@ -63,6 +63,21 @@ force_model = simon_models.rotate_rod_border_schmell_symmetric(
     force_team_spirit_fac=0,
     rod_break_ang_vel= 42,
     rod_break= False,
+)
+
+force_model_zickzack = simon_models.zickzack_pointfind(
+    act_force=10.0,
+    act_torque=10.0,
+    n_type=[1000,100],
+    center_point=[500,500],
+    phase_len=[30, 420, 420, 64],
+    diffusion_coeff=1.4,
+    t_slice = 10 , # in seconds time between calculation of the tasks 
+    steer_speed = 0.8 * np.pi / 180,  # rad per t_slice
+    len_run = 20 ,# mu
+    run_speed = 0.1 , #mu/t_slice
+    zick_angle = 45,
+    experiment_engine=False
 )
 
 

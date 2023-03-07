@@ -322,7 +322,6 @@ class rotate_rod_border_schmell_symmetric(InteractionModel):
         rod_thickness=3,
         radius_colloid=3,
         force_team_spirit_fac=0,
-        diffusion_col_trans=0,
         rod_break_ang_vel= 0.0042,
         rod_break=False,
         acts_on_types: typing.List[int] = None,
@@ -336,7 +335,6 @@ class rotate_rod_border_schmell_symmetric(InteractionModel):
         self.rod_thickness = rod_thickness
         self.radius_colloid = radius_colloid
         self.force_team_spirit_fac = force_team_spirit_fac
-        self.diffusion_col_trans=diffusion_col_trans
         self.rod_break_ang_vel = rod_break_ang_vel
         self.rod_break = rod_break
         self.step_counter = 0
@@ -354,7 +352,9 @@ class rotate_rod_border_schmell_symmetric(InteractionModel):
 
 
         for colloid in colloids:
+
             if colloid.id == self.rod_center_part_id and self.rod_break is True:
+                
                 self.step_counter += 1 * self.turn_direction
                 print(self.step_counter)
                 current_angle = angle_from_vector(colloid.director)
@@ -402,7 +402,7 @@ class rotate_rod_border_schmell_symmetric(InteractionModel):
                     mag,grad=calc_schmell(rod_colloid.pos[:2], colloid.pos[:2])
                     schmell_magnitude += mag
                     schmell_gradient += grad
-            n_neighbor = 0
+            #n_neighbor = 0
             '''
             for fellow_colloid in colloids:
                 if fellow_colloid.type == 0 and fellow_colloid.id!=colloid.id:
@@ -424,16 +424,23 @@ class rotate_rod_border_schmell_symmetric(InteractionModel):
                 angle_diff -= 2 * np.pi
             if angle_diff <= -np.pi:
                 angle_diff += 2 * np.pi
-            torque_z = np.arctan(angle_diff) * self.act_torque
+
+
+            if abs(angle_diff) < 15 * np.pi / 180:
+                acting_force = self.act_torque
+                torque_z = 0
+            else:
+                acting_force = 0
+                torque_z = np.arctan(angle_diff) * self.act_torque   
 
             actions.append(
-                Action(force=self.act_force, torque=np.array([0, 0, torque_z]))
+                Action(force=acting_force, torque=np.array([0, 0, torque_z]))
             )
 
         return actions
 
 
-# this actions does not turn the rod because if the colloid swimm against the rod they do not get al larger schmell
+# this actions does not turn the rod because if the colloid swim against the rod they do not get al larger schmell
 # therefore they think they move in the wrong direction and therefore they stop moving the rod.
 # (To get around this the colloids shall not turn when they touch the rod. not approved)
 class rotate_rod_border_schmell_symmetric_gradient_memory(InteractionModel):
@@ -919,11 +926,11 @@ class zickzack_pointfind(InteractionModel):
             act_force=42,
             act_torque=42,
             n_type=[],
-            rod_schmell_part_id=[42],
+            center_point=[500,500],
             phase_len=[30, 420, 420, 64],
             diffusion_coeff=42,
             zick_angle = 20,
-            t_step = 0.2,
+            t_slice = 0.2,
             steer_speed = 0.8 * np.pi / 180,  # rad per step
             run_speed = 0.1, #mu/step
             len_run =20 ,# mu
@@ -933,13 +940,13 @@ class zickzack_pointfind(InteractionModel):
         self.act_force = act_force
         self.act_torque = act_torque
         self.n_type = n_type
-        self.rod_schmell_part_id = rod_schmell_part_id
+        self.center_point = center_point
 
         self.steer_speed = steer_speed # 0.8 * np.pi / 180  # rad per step
         self.len_run = len_run  # mu
 
         self.diffusion_coeff = diffusion_coeff # mu ^2 per second transversal
-        self.t_step = t_step #second
+        self.t_slice = t_slice #second
         self.zick_angle = zick_angle * np.pi / 180
         self.written_info_data = []
 
@@ -993,7 +1000,7 @@ class zickzack_pointfind(InteractionModel):
     def calc_pot_gradpot(self, c_id , c_pos, c_rod_pos):
         schmell_pot = self.col_RAM[c_id, self.i_schmell_psum] / (self.col_RAM[c_id, self.i_measure_count]+1) # There is one more measurement done here
         mystical_factor=5.5
-        schmell_pot_grad = self.col_RAM[c_id, self.i_schmell_diff_psum]*mystical_factor / (self.col_RAM[c_id, self.i_measure_count]*np.sqrt(4 * self.diffusion_coeff * self.t_step / np.pi ))
+        schmell_pot_grad = self.col_RAM[c_id, self.i_schmell_diff_psum]*mystical_factor / (self.col_RAM[c_id, self.i_measure_count]*np.sqrt(4 * self.diffusion_coeff * self.t_slice / np.pi ))
         schmell_magnitude = 0
         schmell_grad = 0
         a, b = calc_schmell(c_rod_pos[:2], c_pos[:2])  # die z richtung glitch herum deshalb wird sie hier rausgelassen
@@ -1084,12 +1091,9 @@ class zickzack_pointfind(InteractionModel):
             # self.col_RAM[colloid.id,phase] = self.phase_len[colloid.id,0]-1
 
             # record schmell_magnitude every time in whatever phase
-            schmell_magnitude = 0
-            #for rod_colloid in colloids:
-                #if rod_colloid.id in self.rod_schmell_part_id:
-            a, _ = calc_schmell([500,500], colloid.pos[:2])  # die z richtung glitch herum deshalb wird sie hier rausgelassen
-            schmell_pos =  [500, 500]
-            schmell_magnitude += a
+
+            schmell_magnitude, _ = calc_schmell(self.center_point, colloid.pos[:2])  # die z richtung glitch herum deshalb wird sie hier rausgelassen
+            schmell_pos =  self.center_point
 
             # gather information when measurement process is running
             if self.col_RAM[colloid.id, self.i_measure_count] != 0:
@@ -1115,7 +1119,11 @@ class zickzack_pointfind(InteractionModel):
                 #if colloid.id == self.index:
                 #    print("z1015  End measurement with no history available", "phase", phase,"phase_len",self.phase_len[colloid.id,:], "col_RAM",
                 #          self.col_RAM[colloid.id, :])
-
+                print("schmell_pos",schmell_pos)
+                print("colloid.pos",colloid.pos)
+                print("self.i_old_schmell_pot",self.i_old_schmell_pot)
+                print("self.i_old_schmell_pot_grad",self.i_old_schmell_pot_grad)
+                print("self.calc_pot_gradpot()",self.calc_pot_gradpot(colloid.id, colloid.pos, schmell_pos))
                 self.col_RAM[colloid.id, self.i_old_schmell_pot], self.col_RAM[colloid.id, self.i_old_schmell_pot_grad] = self.calc_pot_gradpot(colloid.id, colloid.pos, schmell_pos)
                 self.col_RAM[colloid.id,self.i_schmell_diff_psum] = 0
                 self.col_RAM[colloid.id, self.i_schmell_psum] = 0
@@ -1350,8 +1358,7 @@ class rotate_rod_vision_cone(InteractionModel):
         self.vision_half_angle = vision_half_angle
         self.n_cones = n_cones
         self.rod_particle_type = rod_particle_type
-        self.radius_vector = radius_vector # this it the perceived radius for the vision cones
-        
+        self.radius_vector = np.ones_like(radius_vector)*0.1 # this it the perceived radius for the vision cones
         self.phase_len = phase_len
         self.vision_cone_data = []
         self.written_info_data = None
@@ -1374,7 +1381,7 @@ class rotate_rod_vision_cone(InteractionModel):
         self.col_RAM = np.zeros((self.n_col, self.n_phases + self.n_memory))
         self.col_RAM[:,0] = 1 # starting in phase 0 with a single step
 
-        self.vision_handle= SubdividedVisionCones(self.detection_radius_position, self.vision_half_angle, self.n_cones, self.radius_vector)
+        self.vision_handle= SubdividedVisionCones(self.detection_radius_position,self.vision_half_angle,self.n_cones,self.radius_vector)
 
 
 
@@ -1478,8 +1485,7 @@ class rotate_rod_vision_cone(InteractionModel):
             self.col_RAM[colloid.id, phase] += 1
 
         #print(self.col_RAM[1])
-        if self.experiment_engine==False:
-            pickle.dump(cone_data, self.vision_cone_data_file)
+        pickle.dump(cone_data, self.vision_cone_data_file)
 
         return actions
 
@@ -1507,7 +1513,7 @@ class rotate_rod_vision_cone_interaction(InteractionModel):
         self.vision_half_angle = vision_half_angle
         self.n_cones = n_cones
         self.rod_particle_type = rod_particle_type
-        self.radius_vector = radius_vector # this it the perceived radius for the vision cones
+        self.radius_vector = np.ones_like(radius_vector)*0.1 # this it the perceived radius for the vision cones
         self.phase_len = phase_len
         self.vision_cone_data = []
         self.written_info_data = None
@@ -1698,7 +1704,7 @@ class zickzack_pointfind_maze(InteractionModel):
         self.len_run = 20  # mu
 
         self.diffusion_coeff = 1.4 # mu ^2 per second transversal
-        self.t_step = 0.2 #second
+        self.t_slice = 0.2 #second
         self.zick_angle = zick_angle * np.pi / 180
         self.written_info_data = []
 
@@ -1751,7 +1757,7 @@ class zickzack_pointfind_maze(InteractionModel):
     def calc_pot_gradpot(self, c_id , c_pos, c_rod_pos):
         schmell_pot = self.col_RAM[c_id, self.i_schmell_psum] / (self.col_RAM[c_id, self.i_measure_count]+1) # There is one more measurement done here
         mystical_factor=5.5
-        schmell_pot_grad = self.col_RAM[c_id, self.i_schmell_diff_psum]*mystical_factor / (self.col_RAM[c_id, self.i_measure_count]*np.sqrt(4 * self.diffusion_coeff * self.t_step / np.pi ))
+        schmell_pot_grad = self.col_RAM[c_id, self.i_schmell_diff_psum]*mystical_factor / (self.col_RAM[c_id, self.i_measure_count]*np.sqrt(4 * self.diffusion_coeff * self.t_slice / np.pi ))
         schmell_magnitude = 0
         schmell_grad = 0
         a, b = calc_schmell(c_rod_pos[:2], c_pos[:2])  # die z richtung glitch herum deshalb wird sie hier rausgelassen
