@@ -51,6 +51,7 @@ class SubdividedVisionCones(Observable):
         self.vision_half_angle = vision_half_angle
         self.n_cones = n_cones
         self.radii = radii
+
         self.detected_types = detected_types
         self.angle_fn = jit(calc_signed_angle_between_directors)
 
@@ -171,7 +172,7 @@ class SubdividedVisionCones(Observable):
         # right type and cone only if distance < cut off radius
         return vision_val_out
 
-    def _calculate_cones(self, my_pos, my_director, other_colloids: List[Colloid]):
+    def _calculate_cones(self, my_pos, my_director, other_colloids: List[Colloid], radius_vector):
         """
         Calculates the vision cones of the colloid.
 
@@ -214,7 +215,7 @@ class SubdividedVisionCones(Observable):
             my_director,
             other_colloids_types,
             other_colloids_pos,
-            np.array(self.radii),
+            np.array(radius_vector),
         )
         # collapsing the data of every individual other_colloid and returning the result
         return np.sum(vision_val_out_expanded, axis=0)
@@ -240,13 +241,14 @@ class SubdividedVisionCones(Observable):
             self._detect_all_things_to_see(colloids)
 
         my_pos, my_director = self._calculate_director(colloid)
-
+        
         of_others = [
             [c, self.radii[i]] for i, c in enumerate(colloids) if c is not colloid
         ]
         other_colloids = [of_others[i][0] for i in range(len(of_others))]
-        self.radii = [of_others[i][1] for i in range(len(of_others))]
+        radius_vector = [of_others[i][1] for i in range(len(of_others))]
 
-        observable = self._calculate_cones(my_pos, my_director, other_colloids)
+        observable = self._calculate_cones(my_pos, my_director, other_colloids, radius_vector)
 
         return observable
+
