@@ -58,7 +58,6 @@ force_model = simon_models.find_point_center_schmell_gradient_memory(
     phase_len=[4,4],
 )
 
-
 force_model_sym = simon_models.rotate_rod_border_schmell_symmetric(
     act_force=10.0,
     act_torque=10.0,
