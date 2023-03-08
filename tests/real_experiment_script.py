@@ -50,6 +50,14 @@ force_model_int = simon_models.rotate_rod_vision_cone_interaction(
     experiment_engine=True
 )
 
+force_model = simon_models.find_point_center_schmell_gradient_memory(
+    act_force=10.0,
+    act_torque=10.0,
+    n_type=[1000,100],
+    center_point=[0,0],
+    phase_len=[4,4],
+)
+
 
 force_model_sym = simon_models.rotate_rod_border_schmell_symmetric(
     act_force=10.0,
@@ -69,7 +77,7 @@ force_model_zickzack = simon_models.zickzack_pointfind(
     act_force=10.0,
     act_torque=10.0,
     n_type=[1000,100],
-    center_point=[500,500],
+    center_point=[0,0],
     phase_len=[30, 420, 420, 64],
     diffusion_coeff=1.4,
     t_slice = 10 , # in seconds time between calculation of the tasks 

@@ -548,9 +548,6 @@ class rotate_rod_center_schmell_gradient_memory(InteractionModel):
             n_type=[],
             rod_schmell_part_id=[42],
             rod_particle_type=42,
-            rod_thickness=42,
-            radius_colloid=42,
-            force_team_spirit_fac=0,
             phase_len=[4,4],
             acts_on_types: typing.List[int] = None,
     ):
@@ -559,9 +556,6 @@ class rotate_rod_center_schmell_gradient_memory(InteractionModel):
         self.n_type = n_type
         self.rod_schmell_part_id = rod_schmell_part_id
         self.rod_particle_type = rod_particle_type
-        self.rod_thickness = rod_thickness
-        self.radius_colloid = radius_colloid
-        self.force_team_spirit_fac = force_team_spirit_fac
         self.phase_len = phase_len
         if acts_on_types is None:
             acts_on_types = [0]
@@ -613,7 +607,7 @@ class rotate_rod_center_schmell_gradient_memory(InteractionModel):
                     self.col_RAM[colloid.id, phase] = 1
                 else:
                     self.col_RAM[colloid.id, phase] = 0
-                    phase = 1  # jump to steer phase and head straight forward
+                    phase = 1  # jump to steer phase 
                     self.col_RAM[colloid.id, phase] = 1
                     #pass
                 self.col_RAM[colloid.id,self.n_phases] = schmell_magnitude
@@ -622,7 +616,7 @@ class rotate_rod_center_schmell_gradient_memory(InteractionModel):
                 force_mult = 1
                 torque_z =  0
             elif phase==1: #steer
-                force_mult = 1
+                force_mult = 0
                 torque_z =  1
             else:
                 raise Exception("Colloid doesn't now what to do. Unexpected phase identifier selected")
@@ -642,6 +636,101 @@ class rotate_rod_center_schmell_gradient_memory(InteractionModel):
         #print(self.col_RAM[1])
 
         return actions
+
+
+# this is the robert way of doing it
+class find_point_center_schmell_gradient_memory(InteractionModel):
+    def __init__(
+            self,
+            act_force=42,
+            act_torque=42,
+            n_type=[],
+            center_point=[500,500],
+            phase_len=[4,4],
+            acts_on_types: typing.List[int] = None,
+    ):
+        self.act_force = act_force
+        self.act_torque = act_torque
+        self.n_type = n_type
+        self.center_point=center_point
+        self.phase_len = phase_len
+        if acts_on_types is None:
+            acts_on_types = [0]
+        self.acts_on_types = acts_on_types
+
+        self.n_col = sum(self.n_type)
+        self.n_phases = 2  # run, steer
+        self.n_memory = 2  # schmellmemory
+        self.col_RAM = np.zeros((self.n_col, self.n_phases + self.n_memory))
+        self.col_RAM[:,0] = 1 # starting in phase 0 with a single step
+
+        #steer_angle=36  # degree
+        #steer_steps=int(np.ceil(steer_angle/0.8)) # 0.8 degree/step
+        #run_distance=4 # mu
+        #run_steps = int(np.ceil(run_distance/0.1)) # mu per step
+        #self.phase_len = [run_steps,steer_steps] #run ,steer
+
+
+        self.phase_trans = [1,0]
+
+
+        #print(self.col_RAM[1])
+
+    def calc_action(self, colloids) -> typing.List[Action]:
+        actions = []
+
+        for colloid in colloids:
+            if colloid.type not in self.acts_on_types:
+                actions.append(Action())
+                continue
+
+            #setup phases
+            if sum(self.col_RAM[colloid.id, :self.n_phases]) == 0:
+                phase = 0
+            else:
+                #print(self.col_RAM[colloid.id, :self.n_phases])
+                [phase], = np.where(self.col_RAM[colloid.id, :self.n_phases] != 0)
+
+            schmell_magnitude,_= calc_schmell(self.center_point,colloid.pos[:2]) # die z richtung glitch herum deshalb wird sie hier rausgelassen
+
+            
+            if phase == 0 and self.col_RAM[colloid.id, phase] == self.phase_len[phase]:
+                if self.col_RAM[colloid.id,self.n_phases] < schmell_magnitude:  #self.N_phase is the index vor schmellmemory
+                    self.col_RAM[colloid.id, phase]=0
+                    phase=0  # jump to run phase and head straight forward
+                    self.col_RAM[colloid.id, phase] = 1
+                else:
+                    self.col_RAM[colloid.id, phase] = 0
+                    phase = 1  # jump to steer phase 
+                    self.col_RAM[colloid.id, phase] = 1
+                    #pass
+                self.col_RAM[colloid.id,self.n_phases] = schmell_magnitude
+
+            if phase==0: #run
+                force_mult = 1
+                torque_z =  0
+            elif phase==1: #steer
+                force_mult = 0
+                torque_z =  1
+            else:
+                raise Exception("Colloid doesn't now what to do. Unexpected phase identifier selected")
+
+            actions.append(
+                Action(force=self.act_force * force_mult, torque=np.array([0, 0, self.act_torque* torque_z]))
+            )
+
+            #propagate phases
+            for j in range(self.n_phases):
+                if phase == j and self.col_RAM[colloid.id, phase] == self.phase_len[j]:
+                    self.col_RAM[colloid.id, phase] = 0
+                    phase = self.phase_trans[j]
+
+            self.col_RAM[colloid.id, phase] += 1
+
+        #print(self.col_RAM[1])
+
+        return actions
+
 
 
 class rotate_rod_center_schmell_gradient_memory_touch(InteractionModel):
